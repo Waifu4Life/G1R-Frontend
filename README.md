@@ -42,5 +42,5 @@ Steam Deck / Linux: run it with the LÖVE 11.5 AppImage. Windows and Linux are s
 | Fullscreen | F11 | | Icon at top right |
 
 ## Credits
-Frontend by Waifu4Life
-Gen1 Recomp Deluxe by bryanthaboi https://github.com/bryanthaboi
+- Frontend by Waifu4Life
+- Gen1 Recomp Deluxe by bryanthaboi https://github.com/bryanthaboi
