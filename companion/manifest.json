@@ -1,0 +1,15 @@
+{
+  "id": "g1r_frontend_companion",
+  "name": "G1R Frontend Companion",
+  "version": "1.1.0",
+  "api": 2,
+  "games": ["all"],
+  "entry": "main.lua",
+  "profile": "content",
+  "game_version": ">=0.0.0-dev <1.0.0",
+  "category": "Utility",
+  "priority": 0,
+  "dependencies": [],
+  "experimental": false,
+  "description": "Installed by the G1R Frontend. When a game was started from the frontend, closing the game window closes Gen1 Recomp instead of reopening its launcher."
+}
