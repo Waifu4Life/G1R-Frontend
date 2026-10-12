@@ -15,10 +15,9 @@ with keyboard, mouse or gamepad.
 - Fullscreen or a remembered window; A/B swap for controllers
 
 ## Running it
-1. Install [LÖVE 11.5](https://love2d.org).
-2. Zip the contents of this folder (so `main.lua` is at the top of the zip) and rename it
-   `G1R-Frontend.love`, or run `love .` from this folder.
-3. On first start, point it at your Gen1 Recomp folder (or put the .love inside that folder).
+1. Download and install [LÖVE 11.5](https://love2d.org).
+2. Make sure that LUA files are associated with LÖVE 11.5.
+3. On first start, point it at your Gen1 Recomp Deluxe folder (or put the G1R-Frontend.love inside that folder).
 
 Steam Deck / Linux: run it with the LÖVE 11.5 AppImage. Windows and Linux are supported.
 
