@@ -219,7 +219,7 @@ local KEY_ROWS = {
 
 function O.textInput(title, initial, onDone, maxLen)
   maxLen = maxLen or 24
-  local self = { kind = "text", title = title, text = initial or "", lower = false }
+  local self = { kind = "text", title = title, text = UI.safe(initial or ""), lower = false }
 
   local function add(ch)
     if #self.text < maxLen then self.text = self.text .. ch end
@@ -252,7 +252,7 @@ function O.textInput(title, initial, onDone, maxLen)
     local specials = {
       { "case", self.lower and "ABC" or "abc", 2, function() self.lower = not self.lower end },
       { "space", "Space", 3, function() add(" ") end },
-      { "del", "Delete", 2, function() self.text = self.text:sub(1, -2) end },
+      { "del", "Delete", 2, function() self.text = UI.dropLast(self.text) end },
       { "ok", "OK", 3, function() self:submit() end },
     }
     local sx = gx
@@ -291,7 +291,7 @@ function O.textInput(title, initial, onDone, maxLen)
   end
 
   function self:keypressed(key)
-    if key == "backspace" then self.text = self.text:sub(1, -2) return true end
+    if key == "backspace" then self.text = UI.dropLast(self.text) return true end
     if key == "return" or key == "kpenter" then self:submit() return true end
     return false
   end

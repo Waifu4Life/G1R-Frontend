@@ -65,7 +65,8 @@ function R.findExe(dir)
   local best
   for _, it in ipairs(items) do
     local n = it.name:lower()
-    if not it.dir and (n:find("gen1recomp", 1, true) or n:find("g1r", 1, true)
+    if not it.dir and not n:find("frontend", 1, true)
+        and (n:find("gen1recomp", 1, true) or n:find("g1r", 1, true)
         or n:find("recomp", 1, true)) then
       local e = FS.ext(n)
       if e == "appimage" then return FS.join(dir, it.name) end

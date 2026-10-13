@@ -3,6 +3,37 @@
 -- window, so positions here are in those "design pixels".
 
 local UI = {}
+local utf8 = require("utf8")
+
+-- Text from outside the frontend (mod manifests, save names, release notes)
+-- isn't always valid UTF-8, and LOVE refuses to measure or draw text that
+-- isn't. Bad bytes become "?".
+function UI.safe(text)
+  text = tostring(text or "")
+  if utf8.len(text) then return text end
+  local out, i, n = {}, 1, #text
+  while i <= n do
+    local c = text:byte(i)
+    local len = c < 0x80 and 1 or (c >= 0xF0 and c < 0xF5) and 4 or (c >= 0xE0 and c < 0xF0) and 3
+      or (c >= 0xC2 and c < 0xE0) and 2 or 0
+    local piece = len > 0 and text:sub(i, i + len - 1) or nil
+    if piece and #piece == len and utf8.len(piece) then
+      out[#out + 1] = piece
+      i = i + len
+    else
+      out[#out + 1] = "?"
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+-- Drop the last character (not the last byte, which could split a letter).
+function UI.dropLast(text)
+  local off = utf8.offset(text, -1)
+  if not off then return "" end
+  return text:sub(1, off - 1)
+end
 
 UI.W, UI.H = 1920, 1080
 
@@ -55,7 +86,7 @@ end
 
 -- Text centred in a box, squeezed sideways if it's too wide.
 function UI.textCentered(text, font, x, y, w, h, color)
-  text = tostring(text or "")
+  text = UI.safe(text)
   love.graphics.setFont(font)
   local tw, th = font:getWidth(text), font:getHeight()
   local sx = 1
@@ -66,11 +97,11 @@ end
 
 -- Text left-aligned on one line, cut with "..." when too wide.
 function UI.textClip(text, font, x, y, w, color)
-  text = tostring(text or "")
+  text = UI.safe(text)
   love.graphics.setFont(font)
   if font:getWidth(text) > w then
-    while #text > 1 and font:getWidth(text .. "...") > w do
-      text = text:sub(1, #text - 1)
+    while (utf8.len(text) or 0) > 1 and font:getWidth(text .. "...") > w do
+      text = UI.dropLast(text)
     end
     text = text .. "..."
   end
@@ -127,7 +158,7 @@ end
 
 -- Wrap text into lines that fit a width.
 function UI.wrap(font, text, width)
-  local _, lines = font:getWrap(tostring(text or ""), width)
+  local _, lines = font:getWrap(UI.safe(text), width)
   return lines
 end
 
