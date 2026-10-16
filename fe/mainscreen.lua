@@ -11,6 +11,7 @@ local Config = require("fe.config")
 local S = require("fe.serial")
 
 local M = { activeTab = 1, focus = "tab1", modScroll = 0, modFilter = "all", modSort = "order",
+  modQuery = "", modUpdates = {},
             menuOpen = nil }
 local App   -- set by M.init
 
@@ -920,6 +921,12 @@ local function modsShown()
     if not ok then
       for _, g in ipairs(m.games) do if g == M.modFilter then ok = true end end
     end
+    if ok and M.modQuery ~= "" then
+      local q = M.modQuery:lower()
+      local hay = (tostring(m.name) .. " " .. tostring(m.id) .. " " .. tostring(m.description)
+        .. " " .. tostring(m.category or "")):lower()
+      ok = hay:find(q, 1, true) ~= nil
+    end
     if ok then out[#out + 1] = m end
   end
   table.sort(out, function(a, b)
@@ -971,23 +978,168 @@ function M.importModZip(path, done)
 end
 
 -- Download a mod release .zip from GitHub and install it.
-local function installRelease(m, rel)
+-- done(ok, msg), when given, replaces the message box (Update all uses it).
+local function installRelease(m, rel, done)
   local zip
   for _, a in ipairs(rel.assets or {}) do
     if type(a.name) == "string" and a.name:lower():match("%.zip$") then
       if not zip or a.name:lower():find(m.id:lower(), 1, true) == 1 then zip = a end
     end
   end
-  if not zip then App.message("Mods", "That release has no .zip to install.") return end
+  if not zip then
+    local msg = "That release has no .zip to install."
+    if done then done(false, msg) else App.message("Mods", msg) end
+    return
+  end
   local tmp = love.filesystem.getSaveDirectory() .. "/download.zip"
   App.busy("Downloading " .. m.name .. " " .. tostring(rel.tag_name) .. "...")
   App.request({ cmd = "download", url = zip.browser_download_url, path = tmp }, function(res)
     App.busy(nil)
-    if not res.ok then App.message("Mods", res.message) return end
+    if not res.ok then
+      if done then done(false, res.message) else App.message("Mods", res.message) end
+      return
+    end
     M.importModZip(res.path, function(ok, msg)
       os.remove(res.path)
+      if ok then M.modUpdates[m.id] = nil end
+      if done then done(ok, msg) return end
       App.message(ok and "Mod updated" or "Mod not updated", msg)
     end)
+  end)
+end
+
+---------------------------------------------------------------------------
+-- Check for updates / Update all (every mod whose manifest names a GitHub
+-- repo, the same "github": "owner/repo" field the per-mod check uses).
+-- Mods are asked one after another, not all at once, so GitHub isn't
+-- flooded. Results are kept in M.modUpdates until the next check.
+---------------------------------------------------------------------------
+local function modRepo(m)
+  local repo = m.manifest and m.manifest.github
+  if type(repo) ~= "string" then return nil end
+  repo = repo:gsub("^%s+", ""):gsub("%s+$", "")
+  repo = repo:gsub("^https?://github%.com/", ""):gsub("%.git$", ""):gsub("/+$", "")
+  if not repo:match("^[%w%-%._]+/[%w%-%._]+$") then return nil end
+  return repo
+end
+
+-- done(found, checked, skipped, errors): found = { { mod, rel, newest } }
+local function checkAllMods(done)
+  local list, skipped = {}, {}
+  for _, m in ipairs(mods) do
+    if modRepo(m) then list[#list + 1] = m else skipped[#skipped + 1] = m end
+  end
+  local found, errors, i = {}, {}, 0
+  M.modUpdates = {}
+  local function nextMod()
+    i = i + 1
+    local m = list[i]
+    if not m then
+      App.busy(nil)
+      M.modChecked = true
+      done(found, #list, skipped, errors)
+      return
+    end
+    App.busy(("Checking for updates... %d of %d"):format(i, #list))
+    App.request({ cmd = "fetch", url = "https://api.github.com/repos/" .. modRepo(m) .. "/releases/latest" },
+      function(res)
+        local rel = res.ok and S.decodeJson(res.body) or nil
+        if type(rel) == "table" and rel.tag_name then
+          local newest = tostring(rel.tag_name):gsub("^[vV]", "")
+          if R.compareVersions(m.version, newest) < 0 then
+            found[#found + 1] = { m, rel, newest }
+            M.modUpdates[m.id] = { rel = rel, version = newest }
+          end
+        else
+          local why = not res.ok and res.message
+            or (type(rel) == "table" and rel.message) or "no releases"
+          errors[#errors + 1] = m.name .. ": " .. tostring(why)
+          -- GitHub's limit for unsigned requests is per hour; stop asking.
+          if tostring(why):lower():find("rate limit", 1, true) then i = #list end
+        end
+        nextMod()
+      end)
+  end
+  nextMod()
+end
+
+local function updateList(found)
+  local lines = {}
+  for _, f in ipairs(found) do
+    lines[#lines + 1] = ("%s: v%s -> v%s"):format(f[1].name, tostring(f[1].version), f[3])
+  end
+  return table.concat(lines, "\n")
+end
+
+local function problemsText(skipped, errors)
+  local out = {}
+  if #errors > 0 then
+    out[#out + 1] = "Couldn't check:\n" .. table.concat(errors, "\n")
+  end
+  if #skipped > 0 then
+    local names = {}
+    for _, m in ipairs(skipped) do names[#names + 1] = m.name end
+    out[#out + 1] = "No update source in their manifest: " .. table.concat(names, ", ")
+  end
+  return #out > 0 and ("\n\n" .. table.concat(out, "\n\n")) or ""
+end
+
+local function installAll(found)
+  local results, i = {}, 0
+  local function nextOne()
+    i = i + 1
+    local f = found[i]
+    if not f then
+      App.busy(nil)
+      M.refreshMods()
+      local okCount, lines = 0, {}
+      for _, r in ipairs(results) do
+        if r.ok then okCount = okCount + 1 end
+        lines[#lines + 1] = (r.ok and "Updated  " or "Failed   ") .. r.name
+          .. (r.ok and "" or (" - " .. tostring(r.msg)))
+      end
+      App.message("Update all", ("%d of %d mods updated.\n\n%s"):format(okCount, #results,
+        table.concat(lines, "\n")))
+      return
+    end
+    installRelease(f[1], f[2], function(ok, msg)
+      results[#results + 1] = { name = f[1].name .. " v" .. f[3], ok = ok, msg = msg }
+      nextOne()
+    end)
+  end
+  nextOne()
+end
+
+local function checkForModUpdates()
+  if needFolder() then return end
+  checkAllMods(function(found, checked, skipped, errors)
+    local extra = problemsText(skipped, errors)
+    if #found == 0 then
+      App.message("Check for updates",
+        (checked > 0 and ("All %d mods that can be checked are up to date."):format(checked)
+          or "None of your mods say where their updates come from.") .. extra)
+      return
+    end
+    App.message("Updates available",
+      ("%d mod%s can be updated:\n\n%s%s"):format(#found, #found == 1 and "" or "s",
+        updateList(found), extra), {
+        { label = "Update all", fill = UI.colors.green, onPress = function() installAll(found) end },
+        { label = "Not now" } })
+  end)
+end
+
+local function updateAllMods()
+  if needFolder() then return end
+  checkAllMods(function(found, checked, skipped, errors)
+    if #found == 0 then
+      App.message("Update all", (checked > 0 and "Every mod is already up to date."
+        or "None of your mods say where their updates come from.") .. problemsText(skipped, errors))
+      return
+    end
+    App.message("Update all",
+      ("Install these updates? Close Gen1 Recomp first.\n\n%s"):format(updateList(found)), {
+        { label = "Install", fill = UI.colors.green, onPress = function() installAll(found) end },
+        { label = "Not now" } })
   end)
 end
 
@@ -1105,14 +1257,30 @@ local function modsLayout(items)
   local px, py = MOD_X + 20, MOD_Y + 16
   items[#items + 1] = { id = "m_installed", label = "Installed", x = px, y = py, w = 240, h = 56,
     fill = UI.colors.white, edge = UI.colors.panelEdge, font = UI.sans(24), onPress = function() end }
-  items[#items + 1] = { id = "m_search", label = "Search (later)", x = px + 256, y = py, w = 240, h = 56,
-    fill = UI.colors.panel2, edge = UI.colors.panelEdge, font = UI.sans(24), disabled = true,
-    textColor = UI.colors.white,
-    onPress = function() App.toast("Searching online mods comes in a later build.") end }
+  -- Search filters the installed list by name, id, category or description.
+  -- While a search is on, its button shows it and a Clear button appears.
+  local searching = M.modQuery ~= ""
+  items[#items + 1] = { id = "m_search", label = searching and ("Search: " .. M.modQuery) or "Search",
+    x = px + 256, y = py, w = 320, h = 56,
+    fill = searching and UI.colors.white or UI.colors.panel2, edge = UI.colors.panelEdge,
+    font = UI.sans(24), textColor = not searching and UI.colors.white or nil,
+    onPress = function()
+      App.push(O.textInput("Search mods", M.modQuery, function(text)
+        M.modQuery = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        M.modScroll = 0
+      end, 30))
+    end }
+  if searching then
+    items[#items + 1] = { id = "m_search_clear", label = "Clear", x = px + 588, y = py, w = 120, h = 56,
+      fill = UI.colors.panel2, edge = UI.colors.panelEdge, font = UI.sans(24), textColor = UI.colors.white,
+      onPress = function() M.modQuery = ""; M.modScroll = 0 end }
+  end
   local sortLabel = ({ order = "Load order", name = "Name", category = "Category" })[M.modSort]
   local tools = {
     { "m_sort", "Sort: " .. sortLabel, UI.colors.panel2, function()
       M.modSort = ({ order = "name", name = "category", category = "order" })[M.modSort] end },
+    { "m_update_all", "Update all", UI.colors.panel2, function() updateAllMods() end },
+    { "m_check_updates", "Check for updates", UI.colors.panel2, function() checkForModUpdates() end },
     { "m_enable", "Enable all", UI.colors.ok, function()
       local ch = {}
       for _, m in ipairs(modsShown()) do
@@ -1194,7 +1362,9 @@ end
 
 local function drawModsPanel(items, focusId)
   UI.panel(MOD_X, MOD_Y, MOD_W, MOD_H)
-  UI.textClip("Or drop a mod .zip onto the window.", UI.sans(22), MOD_X + 20, MOD_Y + 92, 600, UI.colors.dim)
+  -- Sits on the top row now: the tool buttons below grew (Update all,
+  -- Check for updates) and reach this far left.
+  UI.textClip("Or drop a mod .zip onto the window.", UI.sans(22), MOD_X + 750, MOD_Y + 32, 520, UI.colors.dim)
   UI.textClip("Show for:", UI.sans(22), MOD_X + 20, MOD_Y + 176, 140, UI.colors.dim)
   local profile = modOpts.activeProfile
   UI.textClip("Profile: " .. (type(profile) == "string" and profile or "none"), UI.sans(20),
@@ -1202,7 +1372,8 @@ local function drawModsPanel(items, focusId)
   if not R.root then
     UI.textCentered("Pick your Gen1 Recomp folder to see your mods.", UI.sans(28), MOD_X, LIST_Y, MOD_W, 80, UI.colors.dim)
   elseif #modsShown() == 0 then
-    UI.textCentered("No mods installed for this game.", UI.sans(28), MOD_X, LIST_Y, MOD_W, 80, UI.colors.dim)
+    UI.textCentered(M.modQuery ~= "" and ("No installed mod matches \"" .. M.modQuery .. "\".")
+      or "No mods installed for this game.", UI.sans(28), MOD_X, LIST_Y, MOD_W, 80, UI.colors.dim)
   end
   love.graphics.setScissor(MOD_X + 10, LIST_Y, MOD_W - 20, LIST_H)
   local drawn = {}
@@ -1220,8 +1391,14 @@ local function drawModsPanel(items, focusId)
       local cat = (m.category and tostring(m.category):upper() or "MOD")
       local gens = type(m.gameClaim) == "table" and table.concat(m.gameClaim, "+"):upper() or "ALL GAMES"
       UI.textClip(cat .. "  /  " .. gens, UI.sans(18), MOD_X + 44, y + 48, 600, UI.colors.dim)
-      UI.textClip("v" .. tostring(m.version) .. (m.experimental and "   Experimental" or "   Ready"),
-        UI.sans(22), MOD_X + 44, y + 70, 400, UI.colors.ok)
+      local upd = M.modUpdates[m.id]
+      if upd then
+        UI.textClip("v" .. tostring(m.version) .. "   Update: v" .. tostring(upd.version),
+          UI.sans(22), MOD_X + 44, y + 70, 400, UI.colors.warn)
+      else
+        UI.textClip("v" .. tostring(m.version) .. (m.experimental and "   Experimental" or "   Ready"),
+          UI.sans(22), MOD_X + 44, y + 70, 400, UI.colors.ok)
+      end
       UI.textClip(m.description, UI.sans(20), MOD_X + 400, y + 72, MOD_W - 470, UI.colors.white)
     end
   end

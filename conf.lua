@@ -1,7 +1,7 @@
 function love.conf(t)
   t.identity = "g1r-frontend"
   t.version = "11.5"
-  t.window.title = "G1R Frontend (build 7)"
+  t.window.title = "G1R Frontend (build 8)"
   t.window.width = 1280
   t.window.height = 720
   t.window.minwidth = 640

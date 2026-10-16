@@ -1,4 +1,4 @@
-G1R FRONTEND - build 7
+G1R FRONTEND - build 8
 
 WHAT YOU NEED
   LOVE 11.5 (the same engine Gen1 Recomp uses): https://love2d.org
@@ -39,3 +39,8 @@ GOOD TO KNOW
     nothing when you start games from Recomp itself.
   - Updates download into Gen1 Recomp's updates folder; Recomp uses them the
     next time it starts.
+  - Mods tab: Search filters your installed mods by name or description.
+    Check for updates asks GitHub about every mod whose manifest names its
+    repo ("github": "owner/repo"); mods with a newer release show
+    "Update: vX" in yellow. Update all checks and then installs them all.
+    GitHub allows about 60 checks an hour without an account.
